@@ -2,5 +2,11 @@ venv*
 .DS_Store*
 *.pyc
 
-
+# dataset folder
 data/
+
+# local files folder
+.idea/
+
+# model checkpoint file
+model_best.pth.tar

@@ -46,6 +46,7 @@ cfg = vars(config)
 
 for i in range(cfg['n_exp']):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print("The device used in the experiment {} is {}.".format(i + 1, device))
     model = CNN(cfg['batch_size'], cfg['std'], device=device)
     seed = cfg['seeds'][i]
     acc, acc_best, l, sl, usl, indices = train(model, seed, device=device, **cfg)

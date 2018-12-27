@@ -7,7 +7,7 @@ from utils import calc_metrics, prepare_mnist, weight_schedule
 
 
 def sample_train(train_dataset, test_dataset, batch_size, k, n_classes,
-                 seed, shuffle_train=True, return_idxs=True):
+                 seed, shuffle_train=True, return_idxs=True, n_workers=4):
     
     n = len(train_dataset)
     rrng = np.random.RandomState(seed)
@@ -30,11 +30,11 @@ def sample_train(train_dataset, test_dataset, batch_size, k, n_classes,
 
     train_loader = torch.utils.data.DataLoader(dataset=train_dataset, 
                                                batch_size=batch_size,
-                                               num_workers=4,
+                                               num_workers=n_workers,
                                                shuffle=shuffle_train)
     test_loader = torch.utils.data.DataLoader(dataset=test_dataset, 
                                               batch_size=batch_size,
-                                              num_workers=4,
+                                              num_workers=n_workers,
                                               shuffle=False)
     
     if return_idxs:
@@ -72,7 +72,8 @@ def train(model, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epochs=150,
           early_stop=None, c=300, n_classes=10, max_epochs=80,
           max_val=30., ramp_up_mult=-5., n_samples=60000,
           print_res=True, device=None, **kwargs):
-    
+
+    print("Starting the training!")
     # retrieve data
     train_dataset, test_dataset = prepare_mnist()
     ntrain = len(train_dataset)
@@ -125,7 +126,7 @@ def train(model, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epochs=150,
 
             # save outputs and losses
             outputs[i * batch_size: (i + 1) * batch_size] = out.data.clone()
-            l.append(loss.data[0])
+            l.append(loss.item())  # l.append(loss.data[0])
             supl.append(nbsup * suploss.item()) # supl.append(nbsup * suploss.data[0])
             unsupl.append(unsuploss.item()) # unsupl.append(unsuploss.data[0])
 
