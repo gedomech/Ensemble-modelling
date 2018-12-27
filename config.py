@@ -4,7 +4,7 @@ import numpy as np
 n_exp        = 5
 k            = 100
 # model vars
-drop         = 0.5
+drop         = 0.0
 std          = 0.15
 fm1          = 32
 fm2          = 64
