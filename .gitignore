@@ -9,4 +9,4 @@ data/
 .idea/
 
 # model checkpoint file
-model_best.pth.tar
+model_best.pth.targit
