@@ -46,6 +46,24 @@ def prepare_mnist():
     return train_dataset, test_dataset
 
 
+def fgsm_attack(image, epsilon, data_grad):
+    """
+    FGSM for generating adversarial sample
+    :param image: original clean image
+    :param epsilon: the pixel-wise perturbation amount
+    :param data_grad: gradient of the loss w.r.t the input image
+    :return: perturbed image representing adversarial sample
+    """
+    # Collect the element-wise sign of the data gradient
+    sign_data_grad = data_grad.sign()
+    # Create the perturbed image by adjusting each pixel of the input image
+    perturbed_image = image + epsilon*sign_data_grad
+    # Adding clipping to maintain [0,1] range
+    perturbed_image = torch.clamp(perturbed_image, 0, 1)
+    # Return the perturbed image
+    return perturbed_image
+
+
 def ramp_up(epoch, max_epochs, max_val, mult):
     if epoch == 0:
         return 0.
