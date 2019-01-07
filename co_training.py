@@ -88,56 +88,6 @@ def cotraining_loss(out_lst, adv_lst, labels, device, lambda_cot=0.3, lambda_dif
     :return:
     """
 
-    def sup_loss(out_lst, labels):
-        """
-
-        :param out_lst:
-        :param labels:
-        :return: supervised loss value
-        """
-        loss = 0
-        cond = (labels >= 0)
-        nnz = torch.nonzero(cond)
-        nbsup = len(nnz)
-        # check if labeled samples in batch, return 0 if none
-        if nbsup > 0:
-            for out in out_lst:
-                masked_outputs = torch.index_select(out, dim=0, index=nnz.view(nbsup))
-                masked_labels = labels[cond]
-                loss += F.cross_entropy(masked_outputs, masked_labels)
-            return loss / len(out_lst), nbsup
-        return torch.FloatTensor([0.]).to(device), loss
-
-    def cot_loss(out_lst):
-        """
-        co-training loss based on Jensen-Shannon Divergence (JSD), computed between two distributions as:
-                    JSD(X||Y) = 0.5 * (DKL(X||M) + DKL(Y||M))
-        where DKL is the Kullback-Leibler Divergence and M = 0.5 * (X + Y) is the mixture distribution
-        :param out_lst: iterable object containing the outputs of each model
-        :return:
-        """
-        preds = torch.cat(out_lst)
-        prob_distribs = F.softmax(preds, dim=1)
-        N, BS, C = prob_distribs.shape
-        mixture_distrib = prob_distribs.mean(0, keepdim=True).expand(N, BS, C)
-        return F.kl_div(F.log_softmax(preds, dim=1), mixture_distrib, reduction='mean')
-
-    def diff_loss(out_lst, adv_lst):
-        """
-        View Difference Constrain (VDC) loss based on classifiers prediction given the input sample (x) and the
-        adversarial example g(x):
-                    L_diff(x) = H(p1(x), p2(g1(x))) + H(p2(x), p1(g2(x)))
-        where H is the Cross Entropy
-        :param out_lst: iterable object containing the outputs of each model given input sample (x)
-        :param adv_lst: iterable object containing the outputs of each model for the adversarial examples given x
-        :return: difference loss value
-        """
-        adv_lst = reversed(adv_lst)
-        loss = 0
-        for idx, out in enumerate(out_lst):
-            loss += F.cross_entropy(out, adv_lst[idx])
-        return loss / len(out_lst)
-
     # compute supervised term
     sup_loss, nbsup = sup_loss(out_lst, labels)
 
@@ -161,6 +111,8 @@ def cotraining_loss(out_lst, adv_lst, labels, device, lambda_cot=0.3, lambda_dif
     return total_loss, sup_loss, unsup_cot_loss, unsup_diff_loss, nbsup
 
 
+
+
 def train(model1, model2, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epochs=150,
           batch_size=100, drop=0.5, std=0.15, fm1=16, fm2=32,
           divide_by_bs=False, w_norm=False, data_norm='pixelwise',
@@ -179,8 +131,8 @@ def train(model1, model2, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epoc
     batch_sizes = {  # 'lab': int(0.01 * batch_size),
         'lab': 10,
         # 'unlab': 1 - int(0.01 * batch_size),
-        'unlab': 20,
-        'test': batch_size}
+        'unlab': 10,
+        'test': 10}
     ## batch_size for lab: 1 unlabel: 0, 'test':100
 
     train_loaders, test_loader, indices = bundle_sample_train(train_dataset, test_dataset, batch_sizes,
@@ -219,28 +171,84 @@ def train(model1, model2, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epoc
             lab_img2, true_labels2 = image_batch_generator(train_loaders['lab_dataloader2'], device=device)
 
             # creating the bundle data streams for each model
-            imgs_1, labels_1 = torch.cat(lab_img1, unlab_imgs), torch.cat(true_labels1, false_labels)
-            imgs_2, labels_2 = torch.cat(lab_img2, unlab_imgs), torch.cat(true_labels2, false_labels)
+            imgs_1, labels_1 = torch.cat((lab_img1, unlab_imgs), dim=0), torch.cat((true_labels1, false_labels), dim=0)
+            imgs_2, labels_2 = torch.cat((lab_img2, unlab_imgs), dim=0), torch.cat((true_labels2, false_labels), dim=0)
             bundles = [(imgs_1, labels_1), (imgs_2, labels_2)]
 
             ## add gradient on images
-            imgs_1.requires_grad = True
-            imgs_2.requires_grad = True
+            lab_img1.requires_grad = True
+            lab_img2.requires_grad = True
+            if lab_img2.grad is not None:
+                lab_img1.grad.zero_()
+                lab_img2.grad.zero_()
+
 
             # collect datagrads
-            data_grads = [imgs_1.grad.data, imgs_2.grad.data]
+            # data_grads = [imgs_1.grad.data, imgs_2.grad.data]
 
-            outs, adv_outs = [], []
-            for idx, model in enumerate(models):
-                optimizers[idx].zero_grad()
-                # get output from bundle data streams
-                outs.append(model(bundles[idx][0]))
-                # generate adversarial examples
-                perturbed_data = fgsm_attack(F.log_softmax(bundles[idx][0], dim=1),
-                                             epsilons[idx], data_grads[idx])
-                # re-classify the perturbed image
-                adv_outs.append(model(perturbed_data))
+            optimizers[0].zero_grad()
+            optimizers[1].zero_grad()
 
-            # calculate losses
-            loss, suploss, cotloss, diffloss, nbsup = cotraining_loss(outs, adv_outs, [labels_1, labels_2], device,
-                                                                      lambda_cot=0., lambda_diff=0.)
+            lab_pred_1 = model1(lab_img1)
+            lab_pred_2 = model2(lab_img2)
+
+            loss1 = nn.CrossEntropyLoss()(lab_pred_1, true_labels1)
+            loss2 = nn.CrossEntropyLoss()(lab_pred_2, true_labels2)
+
+            loss1.backward()
+            optimizers[0].step()
+            loss2.backward()
+            optimizers[1].step()
+
+            ## adversarial loss
+            adv_imgs_1 = fgsm_attack(lab_img1, epsilon=0.5, data_grad=lab_img1.grad.data).detach()
+            adv_imgs_2 = fgsm_attack(lab_img2, epsilon=0.5, data_grad=lab_img2.grad.data).detach()
+
+            optimizers[0].zero_grad()
+            optimizers[1].zero_grad()
+            pred_11 = model1(lab_img1)
+            pred_22 = model2(lab_img2)
+            pred_21 = model2(adv_imgs_1)
+            pred_12 = model1(adv_imgs_2)
+            loss3 = F.kl_div(pred_11, pred_21.detach())
+            loss4 = F.kl_div(pred_22, pred_12.detach())
+
+            loss3.backward()
+            optimizers[0].step()
+            loss4.backward()
+            optimizers[1].step()
+
+            ## different loss
+            optimizers[0].zero_grad()
+            optimizers[1].zero_grad()
+
+            pred_unlab_1 = model1(unlab_imgs)
+            pred_unlab_2 = model2(unlab_imgs)
+
+            loss5 = F.kl_div(pred_unlab_1,pred_unlab_2.detach())
+            loss6 = F.kl_div(pred_unlab_2,pred_unlab_1.detach())
+
+            loss = loss5+loss6
+            loss.backward(retain_graph=True)
+            optimizers[0].zero_grad()
+            optimizers[1].zero_grad()
+
+
+
+
+            # data_grads = [imgs_1.grad.data, imgs_2.grad.data]
+            #
+            # outs, adv_outs = [], []
+            # for idx, model in enumerate(models):
+            #     optimizers[idx].zero_grad()
+            #     # get output from bundle data streams
+            #     outs.append(model(bundles[idx][0]))
+            #     # generate adversarial examples
+            #     perturbed_data = fgsm_attack(F.log_softmax(bundles[idx][0], dim=1),
+            #                                  epsilons[idx], data_grads[idx])
+            #     # re-classify the perturbed image
+            #     adv_outs.append(model(perturbed_data))
+            #
+            # # calculate losses
+            # loss, suploss, cotloss, diffloss, nbsup = cotraining_loss(outs, adv_outs, [labels_1, labels_2], device,
+            #                                                           lambda_cot=0., lambda_diff=0.)

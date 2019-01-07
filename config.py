@@ -13,7 +13,7 @@ w_norm       = True
 lr           = 0.002
 beta2        = 0.99
 num_epochs   = 300
-batch_size   = 100
+batch_size   = 10
 # temporal ensembling vars
 alpha        = 0.6
 data_norm    = 'channelwise'
