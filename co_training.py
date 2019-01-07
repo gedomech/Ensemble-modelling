@@ -24,16 +24,32 @@ def bundle_sample_train(train_dataset, test_dataset, batch_sizes, k, n_classes,
         n_class = len(class_items)
         rd = np.random.permutation(np.arange(n_class))
         indices1[i * card: (i + 1) * card] = class_items[rd[:card]]
-        indices2[i * card: (i + 1) * card] = class_items[rd[card:2 * card]]
-        other[cpt: cpt + n_class - 2 * card] = class_items[rd[2 * card:]]
+        indices2[i * card: (i + 1) * card] = class_items[rd[card:2 * card]].long()
+        other[cpt: cpt + n_class - 2 * card] = class_items[rd[2 * card:]].long()
         cpt += n_class - 2 * card
+    indices1 = [x.long() for x in indices1]
+    indices2 = [x.long() for x in indices2]
+    assert len(set(indices1) & set(indices2)) == 0
+    assert len(set(indices1) & set(other)) == 0
+    assert len(set(indices2) & set(other)) == 0
+    assert len(set(indices1) | set(indices2) | set(other)) == 60000
 
-    lab_dataset_1 = copy.deepcopy(train_dataset)[indices1]
-    lab_dataset_2 = copy.deepcopy(train_dataset)[indices2]
+    lab_dataset_1 = copy.deepcopy(train_dataset)
+    lab_dataset_1.train_data = lab_dataset_1.train_data[indices1]
+    lab_dataset_1.train_labels = lab_dataset_1.train_labels[indices1]
+    assert lab_dataset_1.train_labels.__len__() == lab_dataset_1.train_data.__len__() == k
 
-    other = other.long()
-    train_dataset.train_labels[other] = -1
-    unlab_dataset = train_dataset[other]
+    lab_dataset_2 = copy.deepcopy(train_dataset)
+    lab_dataset_2.train_data = lab_dataset_2.train_data[indices2]
+    lab_dataset_2.train_labels = lab_dataset_2.train_labels[indices2]
+    assert lab_dataset_2.train_labels.__len__() == lab_dataset_2.train_data.__len__() == k
+
+    # lab_dataset_1 = copy.deepcopy(train_dataset)[indices1]
+    # lab_dataset_2 = copy.deepcopy(train_dataset)[indices2]
+    other = [x.long() for x in other]
+    unlab_dataset = copy.deepcopy(train_dataset)
+    unlab_dataset.train_data = unlab_dataset.train_data[other]
+    unlab_dataset.train_labels = unlab_dataset.train_labels[other]
 
     train_lab_loader1 = torch.utils.data.DataLoader(dataset=lab_dataset_1,
                                                     batch_size=batch_sizes['lab'],
@@ -55,8 +71,8 @@ def bundle_sample_train(train_dataset, test_dataset, batch_sizes, k, n_classes,
                      'lab_dataloader2': train_lab_loader2,
                      'unlab': train_unlab_loader}
     if return_idxs:
-        return train_loaders, test_loader, indices1, indices2
-    return train_loaders, test_loader
+        return train_loaders, test_loader, (indices1, indices2)
+    return train_loaders, test_loader, (None, None)
 
 
 def cotraining_loss(out_lst, adv_lst, labels, device, lambda_cot=0.3, lambda_diff=0.3):
@@ -71,6 +87,7 @@ def cotraining_loss(out_lst, adv_lst, labels, device, lambda_cot=0.3, lambda_dif
     :param lambda_diff:
     :return:
     """
+
     def sup_loss(out_lst, labels):
         """
 
@@ -149,7 +166,7 @@ def train(model1, model2, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epoc
           divide_by_bs=False, w_norm=False, data_norm='pixelwise',
           early_stop=None, c=300, n_classes=10, max_epochs=80,
           max_val=30., ramp_up_mult=-5., n_samples=60000,
-          print_res=True, device=None, epsilons = [0.01, 0.05], **kwargs):
+          print_res=True, device=None, epsilons=[0.01, 0.05], **kwargs):
     # retrieve data
     train_dataset, test_dataset = prepare_mnist()
     ntrain = len(train_dataset)
@@ -159,11 +176,15 @@ def train(model1, model2, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epoc
     model2.to(device)
 
     # make data loaders
-    batch_sizes = {'lab': int(0.01 * batch_size),
-                   'unlab': 1 - int(0.01 * batch_size),
-                   'test': batch_size}
+    batch_sizes = {  # 'lab': int(0.01 * batch_size),
+        'lab': 10,
+        # 'unlab': 1 - int(0.01 * batch_size),
+        'unlab': 20,
+        'test': batch_size}
+    ## batch_size for lab: 1 unlabel: 0, 'test':100
+
     train_loaders, test_loader, indices = bundle_sample_train(train_dataset, test_dataset, batch_sizes,
-                                                              k, n_classes, seed, shuffle_train=False)
+                                                              k, n_classes, seed, shuffle_train=True)
 
     # setup param optimization
     optimizers = [torch.optim.Adam(model1.parameters(), lr=lr, betas=(0.9, 0.99)),
@@ -178,7 +199,10 @@ def train(model1, model2, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epoc
         t = timer()
 
         # evaluate unsupervised cost weight (TODO: check the w in the paper)
+        ## this is the ramp function that weights on the unsupervised term.
+
         w = weight_schedule(epoch, max_epochs, max_val, ramp_up_mult, k, n_samples)
+        ## w turns out to increase from 0 to 0.05
 
         if (epoch + 1) % 10 == 0:
             print('unsupervised loss weight : {}'.format(w))
@@ -189,6 +213,7 @@ def train(model1, model2, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epoc
         l, supl, unsupl = [], [], []
         for i in range(len(train_loaders['unlab'])):
 
+            ## pick up images.
             unlab_imgs, false_labels = image_batch_generator(train_loaders['unlab'], device=device)
             lab_img1, true_labels1 = image_batch_generator(train_loaders['lab_dataloader1'], device=device)
             lab_img2, true_labels2 = image_batch_generator(train_loaders['lab_dataloader2'], device=device)
@@ -197,6 +222,10 @@ def train(model1, model2, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epoc
             imgs_1, labels_1 = torch.cat(lab_img1, unlab_imgs), torch.cat(true_labels1, false_labels)
             imgs_2, labels_2 = torch.cat(lab_img2, unlab_imgs), torch.cat(true_labels2, false_labels)
             bundles = [(imgs_1, labels_1), (imgs_2, labels_2)]
+
+            ## add gradient on images
+            imgs_1.requires_grad = True
+            imgs_2.requires_grad = True
 
             # collect datagrads
             data_grads = [imgs_1.grad.data, imgs_2.grad.data]
@@ -215,4 +244,3 @@ def train(model1, model2, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epoc
             # calculate losses
             loss, suploss, cotloss, diffloss, nbsup = cotraining_loss(outs, adv_outs, [labels_1, labels_2], device,
                                                                       lambda_cot=0., lambda_diff=0.)
-
