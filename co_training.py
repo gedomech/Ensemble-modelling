@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from utils import calc_metrics, prepare_mnist, weight_schedule, fgsm_attack, image_batch_generator
+from utils import calc_metrics, prepare_mnist, weight_schedule, fgsm_attack, image_batch_generator, cosine_rampdown
 
 
 def bundle_sample_train(train_dataset, test_dataset, batch_sizes, k, n_classes,
@@ -44,8 +44,6 @@ def bundle_sample_train(train_dataset, test_dataset, batch_sizes, k, n_classes,
     lab_dataset_2.train_labels = lab_dataset_2.train_labels[indices2]
     assert lab_dataset_2.train_labels.__len__() == lab_dataset_2.train_data.__len__() == k
 
-    # lab_dataset_1 = copy.deepcopy(train_dataset)[indices1]
-    # lab_dataset_2 = copy.deepcopy(train_dataset)[indices2]
     other = [x.long() for x in other]
     unlab_dataset = copy.deepcopy(train_dataset)
     unlab_dataset.train_data = unlab_dataset.train_data[other]
@@ -161,54 +159,64 @@ def cotraining_loss(out_lst, adv_lst, labels, device, lambda_cot=0.3, lambda_dif
     return total_loss, sup_loss, unsup_cot_loss, unsup_diff_loss, nbsup
 
 
-def train(model1, model2, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epochs=150,
-          batch_size=100, drop=0.5, std=0.15, fm1=16, fm2=32,
-          divide_by_bs=False, w_norm=False, data_norm='pixelwise',
-          early_stop=None, c=300, n_classes=10, max_epochs=80,
-          max_val=30., ramp_up_mult=-5., n_samples=60000,
-          print_res=True, device=None, epsilons=[0.01, 0.05], **kwargs):
+def adjust_learning_rate(optimizers, lr, lambda_cot_max, lambda_diff_max,
+                         ramp_up_mult, n_labeled, n_samples, epoch, max_epoch, total_epochs):
+
+    # Cosine LR rampdown from https://arxiv.org/abs/1608.03983 (but one cycle only)
+    assert total_epochs >= epoch
+    lr *= cosine_rampdown(epoch, total_epochs)
+
+    for optim in optimizers:
+        for param_group in optim.param_groups:
+            param_group['lr'] = lr
+
+    # this is the ramp_up function for lambda_cot and lambda_diff weights on the unsupervised terms.
+    lambda_cot = weight_schedule(epoch, max_epoch, lambda_cot_max, ramp_up_mult, n_labeled, n_samples)
+    lambda_diff = weight_schedule(epoch, max_epoch, lambda_diff_max, ramp_up_mult, n_labeled, n_samples)
+
+    return lr, lambda_cot, lambda_diff
+
+
+def train(model1, model2, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epochs=150, batch_size=100, drop=0.5,
+          std=0.15, fm1=16, fm2=32, divide_by_bs=False, w_norm=False, data_norm='pixelwise', early_stop=None, c=300,
+          n_classes=10, max_epochs=80, lambda_cot_max = 10, lambda_diff_max = 0.5, max_val=30., ramp_up_mult=-5.,
+          n_samples=60000, print_res=True, device=None, epsilons=[0.01, 0.05], **kwargs):
     # retrieve data
     train_dataset, test_dataset = prepare_mnist()
     ntrain = len(train_dataset)
 
     # build model
-    model1.to(device)
-    model2.to(device)
+    models = [model1.to(device), model2.to(device)]
 
     # make data loaders
-    batch_sizes = {  # 'lab': int(0.01 * batch_size),
+    batch_sizes = {
         'lab': 10,
-        # 'unlab': 1 - int(0.01 * batch_size),
         'unlab': 20,
         'test': batch_size}
-    ## batch_size for lab: 1 unlabel: 0, 'test':100
 
     train_loaders, test_loader, indices = bundle_sample_train(train_dataset, test_dataset, batch_sizes,
                                                               k, n_classes, seed, shuffle_train=True)
 
     # setup param optimization
-    optimizers = [torch.optim.Adam(model1.parameters(), lr=lr, betas=(0.9, 0.99)),
-                  torch.optim.Adam(model2.parameters(), lr=lr, betas=(0.9, 0.99))]
+    optimizers = [torch.optim.SGD(model1.parameters(), lr=lr, momentum=0.9, weight_decay=0.0001),
+                  torch.optim.SGD(model2.parameters(), lr=lr, momentum=0.9, weight_decay=0.0001)]
 
     # train
-    models = [model1.train(), model2.train()]
+    models = [x.train() for x in models]
     losses, sup_losses, unsup_losses = [], [], []
     best_loss = 20.
 
     for epoch in range(num_epochs):
         t = timer()
 
-        # evaluate unsupervised cost weight (TODO: check the w in the paper)
-        ## this is the ramp function that weights on the unsupervised term.
-
-        w = weight_schedule(epoch, max_epochs, max_val, ramp_up_mult, k, n_samples)
-        ## w turns out to increase from 0 to 0.05
-
+        _, lambda_cot, lambda_diff = adjust_learning_rate(optimizers, lr, lambda_cot_max, lambda_diff_max,
+                                                          ramp_up_mult, k, n_samples, epoch, max_epochs)
         if (epoch + 1) % 10 == 0:
-            print('unsupervised loss weight : {}'.format(w))
+            print('Unsupervised loss weight lambda_cot {} and lambda_diff {}'.format(lambda_cot, lambda_diff))
 
         # turn it into a usable pytorch object
-        w = torch.FloatTensor([w]).to(device)
+        lambda_cot = torch.FloatTensor([lambda_cot]).to(device)
+        lambda_diff = torch.FloatTensor([lambda_diff]).to(device)
 
         l, supl, unsupl = [], [], []
         for i in range(len(train_loaders['unlab'])):
@@ -243,4 +251,4 @@ def train(model1, model2, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epoc
 
             # calculate losses
             loss, suploss, cotloss, diffloss, nbsup = cotraining_loss(outs, adv_outs, [labels_1, labels_2], device,
-                                                                      lambda_cot=0., lambda_diff=0.)
+                                                                      lambda_cot=lambda_cot, lambda_diff=lambda_diff)

@@ -47,6 +47,30 @@ def prepare_mnist():
     return train_dataset, test_dataset
 
 
+def prepare_svhn(image_size):
+    # normalize data
+    transform = tf.Compose([
+        tf.Scale(image_size),
+        tf.ToTensor(),
+        tf.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+
+    # load train data
+    train_dataset = datasets.SVHN(
+        root='./data',
+        download=True,
+        transform=transform,
+        split='train')
+
+    # load test data
+    test_dataset = datasets.SVHN(
+        root='./data',
+        transform=transform,
+        split='test')
+
+    return train_dataset, test_dataset
+
+
+
 def fgsm_attack(image, epsilon, data_grad):
     """
     FGSM for generating adversarial sample
@@ -228,3 +252,9 @@ def image_batch_generator(dataset=None, device=torch.device):
         _, data_batch = labeled_loader_iter.__next__()
     img, mask = data_batch
     return img.to(device), mask.to(device)
+
+
+def cosine_rampdown(current, rampdown_length, factor=0.05):
+    """Cosine rampdown from https://arxiv.org/abs/1608.03983"""
+    assert 0 <= current <= rampdown_length
+    return float(factor * (1 + np.cos(np.pi * current / rampdown_length)))
