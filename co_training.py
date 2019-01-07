@@ -190,8 +190,8 @@ def train(model1, model2, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epoc
 
     # make data loaders
     batch_sizes = {
-        'lab': 10,
-        'unlab': 20,
+        'lab': 2,
+        'unlab': 98,
         'test': batch_size}
 
     train_loaders, test_loader, indices = bundle_sample_train(train_dataset, test_dataset, batch_sizes,
@@ -209,8 +209,8 @@ def train(model1, model2, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epoc
     for epoch in range(num_epochs):
         t = timer()
 
-        _, lambda_cot, lambda_diff = adjust_learning_rate(optimizers, lr, lambda_cot_max, lambda_diff_max,
-                                                          ramp_up_mult, k, n_samples, epoch, max_epochs)
+        _, lambda_cot, lambda_diff = adjust_learning_rate(optimizers, lr, lambda_cot_max, lambda_diff_max, ramp_up_mult,
+                                                          k, n_samples, epoch, max_epochs, num_epochs)
         if (epoch + 1) % 10 == 0:
             print('Unsupervised loss weight lambda_cot {} and lambda_diff {}'.format(lambda_cot, lambda_diff))
 
@@ -227,28 +227,68 @@ def train(model1, model2, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epoc
             lab_img2, true_labels2 = image_batch_generator(train_loaders['lab_dataloader2'], device=device)
 
             # creating the bundle data streams for each model
-            imgs_1, labels_1 = torch.cat(lab_img1, unlab_imgs), torch.cat(true_labels1, false_labels)
-            imgs_2, labels_2 = torch.cat(lab_img2, unlab_imgs), torch.cat(true_labels2, false_labels)
-            bundles = [(imgs_1, labels_1), (imgs_2, labels_2)]
+            imgs_1, labels_1 = torch.cat((lab_img1, unlab_imgs), dim=0), torch.cat((true_labels1, false_labels), dim=0)
+            imgs_2, labels_2 = torch.cat((lab_img2, unlab_imgs), dim=0), torch.cat((true_labels2, false_labels), dim=0)
+            # bundles = [(imgs_1, labels_1), (imgs_2, labels_2)]
 
-            ## add gradient on images
-            imgs_1.requires_grad = True
-            imgs_2.requires_grad = True
+            # add gradient on images
+            lab_img1.requires_grad = True
+            lab_img2.requires_grad = True
+            # doubt to clarify with Jizong
+            if lab_img2.grad is not None:
+                lab_img1.grad.zero_()
+                lab_img2.grad.zero_()
 
-            # collect datagrads
-            data_grads = [imgs_1.grad.data, imgs_2.grad.data]
+            # evaluate model with labeled data
+            lab_pred_1 = model1(lab_img1)
+            lab_pred_2 = model2(lab_img2)
 
-            outs, adv_outs = [], []
-            for idx, model in enumerate(models):
-                optimizers[idx].zero_grad()
-                # get output from bundle data streams
-                outs.append(model(bundles[idx][0]))
-                # generate adversarial examples
-                perturbed_data = fgsm_attack(F.log_softmax(bundles[idx][0], dim=1),
-                                             epsilons[idx], data_grads[idx])
-                # re-classify the perturbed image
-                adv_outs.append(model(perturbed_data))
+            # compute supervised term of the loss
+            sup_loss = (F.cross_entropy(lab_pred_1, true_labels1) + F.cross_entropy(lab_pred_2, true_labels2)) / len(
+                models)
 
-            # calculate losses
-            loss, suploss, cotloss, diffloss, nbsup = cotraining_loss(outs, adv_outs, [labels_1, labels_2], device,
-                                                                      lambda_cot=lambda_cot, lambda_diff=lambda_diff)
+            # compute unsupervised co-training term of the loss
+            # get unlabeled predictions
+            unlab_preds = torch.cat(model1(unlab_imgs), model2(unlab_imgs))
+            prob_distribs = F.softmax(unlab_preds, dim=2)
+            N, BS, C = prob_distribs.shape
+            mixture_distrib = prob_distribs.mean(0, keepdim=True).expand(N, BS, C)
+            cot_loss = F.kl_div(F.log_softmax(unlab_preds, dim=2), mixture_distrib, reduction='mean')
+
+            # collect datagrads and generate adversarial examples
+            adv_imgs_1 = fgsm_attack(F.log_softmax(imgs_1, dim=1), epsilon=0.5,
+                                     data_grad=imgs_1.grad.data).detach()  # doubt to use detach
+            adv_imgs_2 = fgsm_attack(F.log_softmax(imgs_2, dim=1), epsilon=0.5,
+                                     data_grad=imgs_2.grad.data).detach()  # doubt to use detach
+            # get adversarial predictions
+            # pred_11 = model1(lab_img1)
+            # pred_22 = model2(lab_img2)
+            pred_21 = model2(adv_imgs_1)
+            pred_12 = model1(adv_imgs_2)
+            diff_loss = (F.cross_entropy(lab_pred_1, pred_21) + F.cross_entropy(lab_pred_2, pred_12)) / len(
+                unlab_imgs.size()[0] + lab_img1.size()[0])
+
+            total_loss = sup_loss + lambda_cot * cot_loss + lambda_diff * diff_loss
+
+            # compute the gradients with respect to total_loss
+            optimizers[0].zero_grad()
+            optimizers[1].zero_grad()
+            total_loss.backward(retain_graph=True)
+            optimizers[0].step()
+            optimizers[1].step()
+
+
+            # outs, adv_outs = [], []
+            # for idx, model in enumerate(models):
+            #     optimizers[idx].zero_grad()
+            #     # get output from bundle data streams
+            #     outs.append(model(bundles[idx][0]))
+            #     # generate adversarial examples
+            #     perturbed_data = fgsm_attack(F.log_softmax(bundles[idx][0], dim=1),
+            #                                  epsilons[idx], data_grads[idx])
+            #     # re-classify the perturbed image
+            #     adv_outs.append(model(perturbed_data))
+            #
+            # # calculate losses
+            # loss, suploss, cotloss, diffloss, nbsup = cotraining_loss(outs, adv_outs, [labels_1, labels_2], device,
+            #                                                           lambda_cot=lambda_cot, lambda_diff=lambda_diff)
