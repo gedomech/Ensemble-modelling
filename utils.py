@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 import torchvision.datasets as datasets
 import torchvision.transforms as tf
+from torch.utils.data import DataLoader
 
 
 class GaussianNoise(nn.Module):
@@ -206,3 +207,24 @@ def save_seed_samples(fname, indices):
         ax.imshow(img)
     
     plt.savefig(fname)
+
+
+def image_batch_generator(dataset=None, device=torch.device):
+    """
+    This function generates batches containing (images, masks, paths)
+    :param dataset: torch.utils.data.Dataset object to be loaded
+    :param batch_size: size of the batch
+    :param number_workers: number of threads used to load data
+    :param device: torch.device object where images and masks will be located.
+    :return: (images, masks, paths)
+    """
+    if not issubclass(type(dataset), DataLoader):
+        raise TypeError("Input must be an instance of the torch.utils.data.Dataset class")
+
+    try:
+        _, data_batch = enumerate(dataset).__next__()
+    except:
+        labeled_loader_iter = enumerate(dataset)
+        _, data_batch = labeled_loader_iter.__next__()
+    img, mask = data_batch
+    return img.to(device), mask.to(device)
