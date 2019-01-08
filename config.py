@@ -5,15 +5,15 @@ n_exp        = 5
 k            = 100
 # model vars
 drop         = 0.5
-std          = 0.15
-fm1          = 32
-fm2          = 64
+std          = 0.001
+fm1          = 16
+fm2          = 32
 w_norm       = True
 # optim vars
-lr           = 0.002
+lr           = 0.001
 beta2        = 0.99
 num_epochs   = 300
-batch_size   = 10
+batch_size   = 60
 # temporal ensembling vars
 alpha        = 0.6
 data_norm    = 'channelwise'

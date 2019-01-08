@@ -13,13 +13,13 @@ from torch.utils.data import DataLoader
 
 
 class GaussianNoise(nn.Module):
-    
+
     def __init__(self, batch_size, input_shape=(1, 28, 28), std=0.05, device=None):
         super(GaussianNoise, self).__init__()
         self.shape = (batch_size,) + input_shape
         self.noise = torch.zeros(self.shape).to(device)
         self.std = std
-        
+
     def forward(self, x):
         self.noise.data.normal_(0, std=self.std)
         return x + self.noise
@@ -30,20 +30,20 @@ def prepare_mnist():
     m = (0.1307,)
     st = (0.3081,)
     normalize = tf.Normalize(m, st)
-        
+
     # load train data
     train_dataset = datasets.MNIST(
-                        root='./data',
-                        train=True, 
-                        transform=tf.Compose([tf.ToTensor(), normalize]),  
-                        download=True)
-    
+        root='./data',
+        train=True,
+        transform=tf.Compose([tf.ToTensor(), normalize]),
+        download=True)
+
     # load test data
     test_dataset = datasets.MNIST(
-                        root='./data',
-                        train=False, 
-                        transform=tf.Compose([tf.ToTensor(), normalize]))
-    
+        root='./data',
+        train=False,
+        transform=tf.Compose([tf.ToTensor(), normalize]))
+
     return train_dataset, test_dataset
 
 
@@ -58,7 +58,7 @@ def fgsm_attack(image, epsilon, data_grad):
     # Collect the element-wise sign of the data gradient
     sign_data_grad = data_grad.sign()
     # Create the perturbed image by adjusting each pixel of the input image
-    perturbed_image = image + epsilon*sign_data_grad
+    perturbed_image = image + epsilon * sign_data_grad
     # Adding clipping to maintain [0,1] range
     perturbed_image = torch.clamp(perturbed_image, 0, 1)
     # Return the perturbed image
@@ -99,25 +99,25 @@ def savetime():
 
 def save_losses(losses, sup_losses, unsup_losses, fname, labels=None):
     plt.style.use('ggplot')
-    
+
     # color palette from Randy Olson
     colors = [
         (31, 119, 180),
         (174, 199, 232),
-        (255, 127, 14), 
-        (255, 187, 120),    
+        (255, 127, 14),
+        (255, 187, 120),
         (44, 160, 44),
         (152, 223, 138),
         (214, 39, 40),
-        (255, 152, 150),    
+        (255, 152, 150),
         (148, 103, 189),
-        (197, 176, 213), 
+        (197, 176, 213),
         (140, 86, 75),
-        (196, 156, 148),    
+        (196, 156, 148),
         (227, 119, 194),
         (247, 182, 210),
         (127, 127, 127),
-        (199, 199, 199),    
+        (199, 199, 199),
         (188, 189, 34),
         (219, 219, 141),
         (23, 190, 207),
@@ -127,7 +127,7 @@ def save_losses(losses, sup_losses, unsup_losses, fname, labels=None):
 
     fig, axs = plt.subplots(3, 1, figsize=(12, 18))
     for i in range(3):
-        axs[i].tick_params(axis="both", which="both", bottom="off", top="off",    
+        axs[i].tick_params(axis="both", which="both", bottom="off", top="off",
                            labelbottom="on", left="off", right="off", labelleft="on")
     for i in range(len(losses)):
         axs[0].plot(losses[i], color=colors[i])
@@ -145,7 +145,6 @@ def save_losses(losses, sup_losses, unsup_losses, fname, labels=None):
 
 def save_exp(time, losses, sup_losses, unsup_losses,
              accs, accs_best, idxs, **kwargs):
-    
     def save_txt(fname, accs, **kwargs):
         with open(fname, 'w') as fp:
             fp.write('GLOB VARS\n')
@@ -170,7 +169,7 @@ def save_exp(time, losses, sup_losses, unsup_losses,
             fp.write('best accuracy : {}\n'.format(np.max(accs)))
             fp.write('accuracy : {} (+/- {})\n'.format(np.mean(accs), np.std(accs)))
             fp.write('accs : {}\n'.format(accs))
-        
+
     labels = ['seed_' + str(sd) for sd in kwargs['seeds']]
     if not os.path.isdir('exps'):
         os.mkdir('exps')
@@ -180,7 +179,7 @@ def save_exp(time, losses, sup_losses, unsup_losses,
     fname_bst = os.path.join('exps', time, 'training_best.png')
     fname_fig = os.path.join('exps', time, 'training_all.png')
     fname_smr = os.path.join('exps', time, 'summary.txt')
-    fname_sd  = os.path.join('exps', time, 'seed_samples')
+    fname_sd = os.path.join('exps', time, 'seed_samples')
     best = np.argmax(accs_best)
     save_losses([losses[best]], [sup_losses[best]], [unsup_losses[best]], fname_bst)
     save_losses(losses, sup_losses, unsup_losses, fname_fig, labels=labels)
@@ -192,7 +191,7 @@ def save_exp(time, losses, sup_losses, unsup_losses,
 def save_seed_samples(fname, indices):
     train_dataset, test_dataset = prepare_mnist()
     imgs = train_dataset.train_data[indices.numpy().astype(int)]
-    
+
     plt.style.use('classic')
     fig = plt.figure(figsize=(15, 60))
     gs = gsp.GridSpec(20, 5, width_ratios=[1, 1, 1, 1, 1],
@@ -205,7 +204,7 @@ def save_seed_samples(fname, indices):
         ax.tick_params(axis="both", which="both", bottom="off", top="off",
                        labelbottom="off", left="off", right="off", labelleft="off")
         ax.imshow(img)
-    
+
     plt.savefig(fname)
 
 
@@ -228,3 +227,24 @@ def image_batch_generator(dataset=None, device=torch.device):
         _, data_batch = labeled_loader_iter.__next__()
     img, mask = data_batch
     return img.to(device), mask.to(device)
+
+
+class AverageMeter():
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.sum = 0
+        self.total_size = 0
+        self.reset()
+
+    def update(self, value, size=1):
+        self.sum += float(value) * float(size)
+        self.total_size += size
+
+    @property
+    def avg(self):
+        return float(self.sum)/self.total_size
+
+    def reset(self):
+        self.sum = 0
+        self.total_size = 0

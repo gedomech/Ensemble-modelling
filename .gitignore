@@ -2,6 +2,8 @@ venv*
 .DS_Store*
 *.pyc
 
+*.csv
+
 
 data/
 .idea/

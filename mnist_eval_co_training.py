@@ -4,7 +4,11 @@ from torch.nn.utils import weight_norm
 import config
 from co_training import train
 from utils import GaussianNoise, savetime, save_exp
-
+torch.random.manual_seed(1)
+torch.cuda.manual_seed(1)
+import numpy as np
+np.random.seed(1)
+import argparse
 
 class CNN(nn.Module):
 
@@ -22,44 +26,54 @@ class CNN(nn.Module):
         self.fc = nn.Linear(self.fm2 * 7 * 7, 10)
 
     def forward(self, x):
-        if self.training:
-            x = self.gn(x)
+        # if self.training:
+        #     x = self.gn(x)
         x = self.act(self.mp(self.conv1(x)))
         x = self.act(self.mp(self.conv2(x)))
         x = x.view(-1, self.fm2 * 7 * 7)
-        x = self.drop(x)
+        # x = self.drop(x)
         x = self.fc(x)
         return x
 
+def get_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--sup',action='store_true')
+    parser.add_argument('--jsd',action='store_true')
+    parser.add_argument('--adv',action='store_true')
+    args = parser.parse_args()
+    print(args)
+    return args
 
-# metrics
-accs = []
-accs_best = []
-losses = []
-sup_losses = []
-unsup_losses = []
-idxs = []
+def main(args):
+    # metrics
+    accs = []
+    accs_best = []
+    losses = []
+    sup_losses = []
+    unsup_losses = []
+    idxs = []
 
-ts = savetime()
-cfg = vars(config)
+    ts = savetime()
+    cfg = vars(config)
 
-for i in range(cfg['n_exp']):
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    for i in range(cfg['n_exp']):
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    model1 = CNN(cfg['batch_size'], cfg['std'], device=device)
-    model2 = CNN(cfg['batch_size'], cfg['std'], device=device)
+        model1 = CNN(cfg['batch_size'], cfg['std'], device=device)
+        model2 = CNN(cfg['batch_size'], cfg['std'], device=device)
 
-    seed = cfg['seeds'][i]
-    acc, acc_best, l, sl, usl, indices = train(model1, model2, seed, device=device, **cfg)
-    accs.append(acc)
-    accs_best.append(acc_best)
-    losses.append(l)
-    sup_losses.append(sl)
-    unsup_losses.append(usl)
-    idxs.append(indices)
+        seed = cfg['seeds'][i]
+        acc, acc_best, l, sl, usl, indices = train(model1, model2, seed, device=device, **cfg, args= args)
+        accs.append(acc)
+        accs_best.append(acc_best)
+        losses.append(l)
+        sup_losses.append(sl)
+        unsup_losses.append(usl)
+        idxs.append(indices)
 
-print('saving experiment')
+    print('saving experiment')
 
-save_exp(ts, losses, sup_losses, unsup_losses,
-         accs, accs_best, idxs, **cfg)
-
+    save_exp(ts, losses, sup_losses, unsup_losses,
+             accs, accs_best, idxs, **cfg)
+if __name__ == '__main__':
+    main(get_args())

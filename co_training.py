@@ -4,6 +4,12 @@ from timeit import default_timer as timer
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from random import random
+from utils import AverageMeter
+from tqdm import tqdm
+import pandas as pd
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 from utils import calc_metrics, prepare_mnist, weight_schedule, fgsm_attack, image_batch_generator
 
@@ -75,42 +81,26 @@ def bundle_sample_train(train_dataset, test_dataset, batch_sizes, k, n_classes,
     return train_loaders, test_loader, (None, None)
 
 
-def cotraining_loss(out_lst, adv_lst, labels, device, lambda_cot=0.3, lambda_diff=0.3):
-    """
-    Loss function implementation following paper by Qiao et al. (https://arxiv.org/abs/1803.05984)
-    TODO: check in the paper the configuration of lambda hyperparameters
-    :param out_lst: iterable object containing the outputs of each model given input sample (x)
-    :param adv_lst: iterable object containing the outputs of each model for the adversarial examples given x
-    :param labels: list of the corresponding labels from each bundle data stream (labels=-1 are unlabeled samples)
-    :param device:
-    :param lambda_cot:
-    :param lambda_diff:
-    :return:
-    """
+def inference(model1, model2, val_loader):
+    acc1_meter = AverageMeter()
+    acc2_meter = AverageMeter()
+    model1.eval()
+    model2.eval()
+    val_loader = tqdm(val_loader)
+    for i, (img, gt) in enumerate(val_loader):
+        img, gt = img.to(device), gt.to(device)
+        pred1 = model1(img).max(1)[1]
+        pred2 = model2(img).max(1)[1]
+        acc1 = (pred1 == gt).sum().float() / gt.shape[0]
+        acc2 = (pred2 == gt).sum().float() / gt.shape[0]
+        # print(acc1)
+        acc1_meter.update(acc1, gt.shape[0])
+        acc2_meter.update(acc2, gt.shape[0])
+        val_loader.set_postfix({"acc1": acc1_meter.avg, "acc2": acc2_meter.avg})
 
-    # compute supervised term
-    sup_loss, nbsup = sup_loss(out_lst, labels)
-
-    # get output from generated adversarial examples and compute VDC term
-    unsup_diff_loss = diff_loss(out_lst, adv_lst)
-
-    # retrieve only the unlabeled samples
-    unlab_cond = (labels < 0)
-    nnz = torch.nonzero(unlab_cond)
-    nbunsup = len(nnz)
-    for idx in enumerate(out_lst):
-        out_lst[idx] = torch.index_select(out_lst[idx], dim=0, index=nnz.view(nbsup))
-
-    unsup_cot_loss = 0
-    if nbunsup > 0:
-        # compute co-training term
-        unsup_cot_loss = cot_loss(out_lst)
-
-    total_loss = sup_loss + lambda_cot * unsup_cot_loss + lambda_diff * unsup_diff_loss
-
-    return total_loss, sup_loss, unsup_cot_loss, unsup_diff_loss, nbsup
-
-
+    model1.train()
+    model2.train()
+    return acc1_meter.avg, acc2_meter.avg
 
 
 def train(model1, model2, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epochs=150,
@@ -118,10 +108,9 @@ def train(model1, model2, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epoc
           divide_by_bs=False, w_norm=False, data_norm='pixelwise',
           early_stop=None, c=300, n_classes=10, max_epochs=80,
           max_val=30., ramp_up_mult=-5., n_samples=60000,
-          print_res=True, device=None, epsilons=[0.01, 0.05], **kwargs):
+          print_res=True, device=None, epsilons=[0.01, 0.05], args=None, **kwargs):
     # retrieve data
     train_dataset, test_dataset = prepare_mnist()
-    ntrain = len(train_dataset)
 
     # build model
     model1.to(device)
@@ -129,10 +118,10 @@ def train(model1, model2, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epoc
 
     # make data loaders
     batch_sizes = {  # 'lab': int(0.01 * batch_size),
-        'lab': 10,
+        'lab': 60,
         # 'unlab': 1 - int(0.01 * batch_size),
-        'unlab': 10,
-        'test': 10}
+        'unlab': 60,
+        'test': 60}
     ## batch_size for lab: 1 unlabel: 0, 'test':100
 
     train_loaders, test_loader, indices = bundle_sample_train(train_dataset, test_dataset, batch_sizes,
@@ -141,12 +130,7 @@ def train(model1, model2, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epoc
     # setup param optimization
     optimizers = [torch.optim.Adam(model1.parameters(), lr=lr, betas=(0.9, 0.99)),
                   torch.optim.Adam(model2.parameters(), lr=lr, betas=(0.9, 0.99))]
-
-    # train
-    models = [model1.train(), model2.train()]
-    losses, sup_losses, unsup_losses = [], [], []
-    best_loss = 20.
-
+    record = {}
     for epoch in range(num_epochs):
         t = timer()
 
@@ -154,37 +138,35 @@ def train(model1, model2, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epoc
         ## this is the ramp function that weights on the unsupervised term.
 
         w = weight_schedule(epoch, max_epochs, max_val, ramp_up_mult, k, n_samples)
+        # print(w)
         ## w turns out to increase from 0 to 0.05
 
         if (epoch + 1) % 10 == 0:
-            print('unsupervised loss weight : {}'.format(w))
+            print('unsupervised loss weight : {:.3f}'.format(w))
 
         # turn it into a usable pytorch object
         w = torch.FloatTensor([w]).to(device)
 
-        l, supl, unsupl = [], [], []
-        for i in range(len(train_loaders['unlab'])):
+        acc1, acc2 = inference(model1, model2, test_loader)
+        record[epoch] = {'acc1': acc1, 'acc2': acc2}
+        pd.DataFrame(record).T.to_csv(str(args)+'.csv')
 
+        train_loader= tqdm(train_loaders['lab_dataloader1'])
+        for i,_ in enumerate(train_loader):
             ## pick up images.
             unlab_imgs, false_labels = image_batch_generator(train_loaders['unlab'], device=device)
             lab_img1, true_labels1 = image_batch_generator(train_loaders['lab_dataloader1'], device=device)
             lab_img2, true_labels2 = image_batch_generator(train_loaders['lab_dataloader2'], device=device)
 
-            # creating the bundle data streams for each model
-            imgs_1, labels_1 = torch.cat((lab_img1, unlab_imgs), dim=0), torch.cat((true_labels1, false_labels), dim=0)
-            imgs_2, labels_2 = torch.cat((lab_img2, unlab_imgs), dim=0), torch.cat((true_labels2, false_labels), dim=0)
-            bundles = [(imgs_1, labels_1), (imgs_2, labels_2)]
-
-            ## add gradient on images
+            # add gradient on images
             lab_img1.requires_grad = True
             lab_img2.requires_grad = True
             if lab_img2.grad is not None:
                 lab_img1.grad.zero_()
                 lab_img2.grad.zero_()
-
-
-            # collect datagrads
-            # data_grads = [imgs_1.grad.data, imgs_2.grad.data]
+            unlab_imgs.requires_grad = True
+            if unlab_imgs.grad is not None:
+                unlab_imgs.grad.zero_()
 
             optimizers[0].zero_grad()
             optimizers[1].zero_grad()
@@ -194,61 +176,69 @@ def train(model1, model2, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epoc
 
             loss1 = nn.CrossEntropyLoss()(lab_pred_1, true_labels1)
             loss2 = nn.CrossEntropyLoss()(lab_pred_2, true_labels2)
+            if args.sup:
+                supervisedLoss = loss1 + loss2
+                supervisedLoss.backward()
+                optimizers[0].step()
+                optimizers[1].step()
 
-            loss1.backward()
-            optimizers[0].step()
-            loss2.backward()
-            optimizers[1].step()
+            pred_unlab_1 = F.softmax(model1(unlab_imgs), 1)
+            pred_unlab_2 = F.softmax(model2(unlab_imgs), 1)
+            average_pred = (pred_unlab_1 + pred_unlab_2) / 2
 
-            ## adversarial loss
-            adv_imgs_1 = fgsm_attack(lab_img1, epsilon=0.5, data_grad=lab_img1.grad.data).detach()
-            adv_imgs_2 = fgsm_attack(lab_img2, epsilon=0.5, data_grad=lab_img2.grad.data).detach()
+            loss3 = F.kl_div(F.softmax(pred_unlab_1, 1).log(), average_pred.detach())
+            loss4 = F.kl_div(F.softmax(pred_unlab_2, 1).log(), average_pred.detach())
 
-            optimizers[0].zero_grad()
-            optimizers[1].zero_grad()
-            pred_11 = model1(lab_img1)
-            pred_22 = model2(lab_img2)
-            pred_21 = model2(adv_imgs_1)
-            pred_12 = model1(adv_imgs_2)
-            loss3 = F.kl_div(pred_11, pred_21.detach())
-            loss4 = F.kl_div(pred_22, pred_12.detach())
+            if args.jsd:
+                jsdiv = loss3 + loss4
+                unsupervisedLoss = w * jsdiv
 
-            loss3.backward()
-            optimizers[0].step()
-            loss4.backward()
-            optimizers[1].step()
+                optimizers[0].zero_grad()
+                optimizers[1].zero_grad()
 
-            ## different loss
-            optimizers[0].zero_grad()
-            optimizers[1].zero_grad()
+                unsupervisedLoss.backward()
+                optimizers[0].step()
+                optimizers[1].step()
 
-            pred_unlab_1 = model1(unlab_imgs)
-            pred_unlab_2 = model2(unlab_imgs)
+            ## to generate adversarial example for unlab
 
-            loss5 = F.kl_div(pred_unlab_1,pred_unlab_2.detach())
-            loss6 = F.kl_div(pred_unlab_2,pred_unlab_1.detach())
+            if args.adv:
 
-            loss = loss5+loss6
-            loss.backward(retain_graph=True)
-            optimizers[0].zero_grad()
-            optimizers[1].zero_grad()
+                if random() > 0.5:
+                    adv_imgs_1 = fgsm_attack(lab_img1, epsilon=0.5, data_grad=lab_img1.grad.data).detach()
+                else:
+                    if unlab_imgs.grad is not None:
+                        unlab_imgs.grad.zero_()
+                    unlab_pred = model1(unlab_imgs)
+                    unlab_mask = unlab_pred.max(1)[1]
+                    loss = nn.CrossEntropyLoss()(unlab_pred, unlab_mask.detach())
+                    loss.backward()
+                    adv_imgs_1 = fgsm_attack(unlab_imgs, epsilon=0.5, data_grad=unlab_imgs.grad.data).detach()
 
+                if random() > 0.5:
+                    adv_imgs_2 = fgsm_attack(lab_img2, epsilon=0.5, data_grad=lab_img2.grad.data).detach()
+                else:
+                    if unlab_imgs.grad is not None:
+                        unlab_imgs.grad.zero_()
+                    unlab_pred = model2(unlab_imgs)
+                    unlab_mask = unlab_pred.max(1)[1]
+                    loss = nn.CrossEntropyLoss()(unlab_pred, unlab_mask.detach())
+                    loss.backward()
+                    adv_imgs_2 = fgsm_attack(unlab_imgs, epsilon=0.5, data_grad=unlab_imgs.grad.data).detach()
 
+                pred_11 = F.softmax(model1(lab_img1), 1)
+                pred_22 = F.softmax(model2(lab_img2), 1)
+                pred_21 = F.softmax(model2(adv_imgs_1), 1)
+                pred_12 = F.softmax(model1(adv_imgs_2), 1)
+                loss5 = F.kl_div(pred_11.log(), pred_21.detach())
+                loss6 = F.kl_div(pred_22.log(), pred_12.detach())
 
+                adv_loss = w / 10 * (loss5 + loss6)
 
-            # data_grads = [imgs_1.grad.data, imgs_2.grad.data]
-            #
-            # outs, adv_outs = [], []
-            # for idx, model in enumerate(models):
-            #     optimizers[idx].zero_grad()
-            #     # get output from bundle data streams
-            #     outs.append(model(bundles[idx][0]))
-            #     # generate adversarial examples
-            #     perturbed_data = fgsm_attack(F.log_softmax(bundles[idx][0], dim=1),
-            #                                  epsilons[idx], data_grads[idx])
-            #     # re-classify the perturbed image
-            #     adv_outs.append(model(perturbed_data))
-            #
-            # # calculate losses
-            # loss, suploss, cotloss, diffloss, nbsup = cotraining_loss(outs, adv_outs, [labels_1, labels_2], device,
-            #                                                           lambda_cot=0., lambda_diff=0.)
+                optimizers[0].zero_grad()
+                optimizers[1].zero_grad()
+
+                adv_loss.backward()
+
+                optimizers[0].step()
+                optimizers[1].step()
