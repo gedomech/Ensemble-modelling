@@ -184,12 +184,14 @@ def train(model1, model2, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epoc
 
             pred_unlab_1 = F.softmax(model1(unlab_imgs), 1)
             pred_unlab_2 = F.softmax(model2(unlab_imgs), 1)
+
             average_pred = (pred_unlab_1 + pred_unlab_2) / 2
 
             loss3 = F.kl_div(F.softmax(pred_unlab_1, 1).log(), average_pred.detach())
             loss4 = F.kl_div(F.softmax(pred_unlab_2, 1).log(), average_pred.detach())
 
             if args.jsd:
+
                 jsdiv = loss3 + loss4
                 unsupervisedLoss = w * jsdiv
 
@@ -242,3 +244,6 @@ def train(model1, model2, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epoc
 
                 optimizers[0].step()
                 optimizers[1].step()
+
+
+    return record

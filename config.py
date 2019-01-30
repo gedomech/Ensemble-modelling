@@ -1,7 +1,7 @@
 import numpy as np
 
 # global vars
-n_exp        = 5
+n_exp        = 1
 k            = 100
 # model vars
 drop         = 0.5
@@ -12,7 +12,7 @@ w_norm       = True
 # optim vars
 lr           = 0.001
 beta2        = 0.99
-num_epochs   = 300
+num_epochs   = 3000
 batch_size   = 60
 # temporal ensembling vars
 alpha        = 0.6

@@ -137,17 +137,17 @@ def train(model, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epochs=150,
             if (epoch + 1) % 10 == 0:
                 if i + 1 == 2 * c:
                     print('Epoch [%d/%d], Step [%d/%d], Loss: %.6f, Time (this epoch): %.2f s'%
-                          (epoch + 1, num_epochs, i + 1, len(train_dataset) // batch_size, np.mean(l), timer() - t))
+                          (epoch + 1, num_epochs, i + 1, len(train_dataset) // batch_size,  torch.mean(torch.Tensor(l)), timer() - t))
                 elif (i + 1) % c == 0:
                     print('Epoch [%d/%d], Step [%d/%d], Loss: %.6f'%
-                          (epoch + 1, num_epochs, i + 1, len(train_dataset) // batch_size, np.mean(l)))
+                          (epoch + 1, num_epochs, i + 1, len(train_dataset) // batch_size, torch.mean(torch.Tensor(l))))
 
         # update temporal ensemble
         Z = alpha * Z + (1. - alpha) * outputs
         z = Z * (1. / (1. - alpha ** (epoch + 1)))
 
         # handle metrics, losses, etc.
-        eloss = np.mean(l)
+        eloss = torch.mean(torch.Tensor(l))
         losses.append(eloss)
         sup_losses.append((1. / k) * np.sum(supl))  # division by 1/k to obtain the mean supervised loss
         unsup_losses.append(np.mean(unsupl))

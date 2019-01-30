@@ -47,11 +47,6 @@ def get_args():
 def main(args):
     # metrics
     accs = []
-    accs_best = []
-    losses = []
-    sup_losses = []
-    unsup_losses = []
-    idxs = []
 
     ts = savetime()
     cfg = vars(config)
@@ -63,17 +58,15 @@ def main(args):
         model2 = CNN(cfg['batch_size'], cfg['std'], device=device)
 
         seed = cfg['seeds'][i]
-        acc, acc_best, l, sl, usl, indices = train(model1, model2, seed, device=device, **cfg, args= args)
+        acc= train(model1, model2, seed, device=device, **cfg, args= args)
         accs.append(acc)
-        accs_best.append(acc_best)
-        losses.append(l)
-        sup_losses.append(sl)
-        unsup_losses.append(usl)
-        idxs.append(indices)
 
-    print('saving experiment')
 
-    save_exp(ts, losses, sup_losses, unsup_losses,
-             accs, accs_best, idxs, **cfg)
+    # print('saving experiment')
+    #
+    # records = {'accs':accs, 'cfg':cfg}
+    # np.save('results.npy',records)
+
+
 if __name__ == '__main__':
     main(get_args())
