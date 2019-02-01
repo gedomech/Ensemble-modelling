@@ -247,8 +247,7 @@ def train(args, net, device, use_cuda, trainloader, optimizer):
         # get the inputs
         inputs, labels, ind = data
         if use_cuda:
-            inputs, labels, nearest_dist, ind = inputs.to(device), labels.to(device), nearest_dist.to(device), ind.to(
-                device)
+            inputs, labels, ind = inputs.to(device), labels.to(device), ind.to(device)
 
         # computation of supervised loss term
         pred = net(inputs)
