@@ -5,8 +5,11 @@ venv*
 # dataset folder
 data/
 
+# experiemnts folder
+exps/
+
 # local files folder
 .idea/
 
 # model checkpoint file
-model_best.pth.targit
+model_best.pth.tar
