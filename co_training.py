@@ -207,7 +207,7 @@ def train(model1, model2, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epoc
             if args.adv:
 
                 if random() > 0.5:
-                    adv_imgs_1 = fgsm_attack(lab_img1, epsilon=0.5, data_grad=lab_img1.grad.data).detach()
+                    adv_imgs_1 = fgsm_attack(lab_img1, epsilon=0.05, data_grad=lab_img1.grad.data).detach()
                 else:
                     if unlab_imgs.grad is not None:
                         unlab_imgs.grad.zero_()
@@ -215,10 +215,10 @@ def train(model1, model2, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epoc
                     unlab_mask = unlab_pred.max(1)[1]
                     loss = nn.CrossEntropyLoss()(unlab_pred, unlab_mask.detach())
                     loss.backward()
-                    adv_imgs_1 = fgsm_attack(unlab_imgs, epsilon=0.5, data_grad=unlab_imgs.grad.data).detach()
+                    adv_imgs_1 = fgsm_attack(unlab_imgs, epsilon=0.05, data_grad=unlab_imgs.grad.data).detach()
 
                 if random() > 0.5:
-                    adv_imgs_2 = fgsm_attack(lab_img2, epsilon=0.5, data_grad=lab_img2.grad.data).detach()
+                    adv_imgs_2 = fgsm_attack(lab_img2, epsilon=0.05, data_grad=lab_img2.grad.data).detach()
                 else:
                     if unlab_imgs.grad is not None:
                         unlab_imgs.grad.zero_()
@@ -226,14 +226,14 @@ def train(model1, model2, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epoc
                     unlab_mask = unlab_pred.max(1)[1]
                     loss = nn.CrossEntropyLoss()(unlab_pred, unlab_mask.detach())
                     loss.backward()
-                    adv_imgs_2 = fgsm_attack(unlab_imgs, epsilon=0.5, data_grad=unlab_imgs.grad.data).detach()
+                    adv_imgs_2 = fgsm_attack(unlab_imgs, epsilon=0.05, data_grad=unlab_imgs.grad.data).detach()
 
                 pred_11 = F.softmax(model1(lab_img1), 1)
                 pred_22 = F.softmax(model2(lab_img2), 1)
                 pred_21 = F.softmax(model2(adv_imgs_1), 1)
                 pred_12 = F.softmax(model1(adv_imgs_2), 1)
-                loss5 = F.kl_div(pred_11.log(), pred_21.detach())
-                loss6 = F.kl_div(pred_22.log(), pred_12.detach())
+                loss5 = F.kl_div(pred_21.log(), pred_11.detach())
+                loss6 = F.kl_div(pred_12.log(), pred_22.detach())
 
                 adv_loss = w / 10 * (loss5 + loss6)
 
