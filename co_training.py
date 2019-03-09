@@ -33,29 +33,29 @@ def bundle_sample_train(train_dataset, test_dataset, batch_sizes, k, n_classes,
         indices2[i * card: (i + 1) * card] = class_items[rd[card:2 * card]].long()
         other[cpt: cpt + n_class - 2 * card] = class_items[rd[2 * card:]].long()
         cpt += n_class - 2 * card
-    indices1 = [x.long() for x in indices1]
-    indices2 = [x.long() for x in indices2]
+    indices1 = [x.long().item() for x in indices1]
+    indices2 = [x.long().item() for x in indices2]
     assert len(set(indices1) & set(indices2)) == 0
     assert len(set(indices1) & set(other)) == 0
     assert len(set(indices2) & set(other)) == 0
     assert len(set(indices1) | set(indices2) | set(other)) == 60000
 
     lab_dataset_1 = copy.deepcopy(train_dataset)
-    lab_dataset_1.train_data = lab_dataset_1.train_data[indices1]
-    lab_dataset_1.train_labels = lab_dataset_1.train_labels[indices1]
+    lab_dataset_1.data = lab_dataset_1.data[indices1]
+    lab_dataset_1.targets = lab_dataset_1.targets[indices1]
     assert lab_dataset_1.train_labels.__len__() == lab_dataset_1.train_data.__len__() == k
 
     lab_dataset_2 = copy.deepcopy(train_dataset)
-    lab_dataset_2.train_data = lab_dataset_2.train_data[indices2]
-    lab_dataset_2.train_labels = lab_dataset_2.train_labels[indices2]
+    lab_dataset_2.data = lab_dataset_2.data[indices2]
+    lab_dataset_2.targets = lab_dataset_2.targets[indices2]
     assert lab_dataset_2.train_labels.__len__() == lab_dataset_2.train_data.__len__() == k
 
     # lab_dataset_1 = copy.deepcopy(train_dataset)[indices1]
     # lab_dataset_2 = copy.deepcopy(train_dataset)[indices2]
     other = [x.long() for x in other]
     unlab_dataset = copy.deepcopy(train_dataset)
-    unlab_dataset.train_data = unlab_dataset.train_data[other]
-    unlab_dataset.train_labels = unlab_dataset.train_labels[other]
+    unlab_dataset.data= unlab_dataset.data[other]
+    unlab_dataset.targets = unlab_dataset.targets[other]
 
     train_lab_loader1 = torch.utils.data.DataLoader(dataset=lab_dataset_1,
                                                     batch_size=batch_sizes['lab'],
@@ -86,7 +86,7 @@ def inference(model1, model2, val_loader):
     acc2_meter = AverageMeter()
     model1.eval()
     model2.eval()
-    val_loader = tqdm(val_loader)
+    val_loader = tqdm(val_loader,leave=False)
     for i, (img, gt) in enumerate(val_loader):
         img, gt = img.to(device), gt.to(device)
         pred1 = model1(img).max(1)[1]
@@ -187,8 +187,8 @@ def train(model1, model2, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epoc
 
             average_pred = (pred_unlab_1 + pred_unlab_2) / 2
 
-            loss3 = F.kl_div(F.softmax(pred_unlab_1, 1).log(), average_pred.detach())
-            loss4 = F.kl_div(F.softmax(pred_unlab_2, 1).log(), average_pred.detach())
+            loss3 = F.kl_div(pred_unlab_1.log(), average_pred.detach())
+            loss4 = F.kl_div(pred_unlab_2.log(), average_pred.detach())
 
             if args.jsd:
 
