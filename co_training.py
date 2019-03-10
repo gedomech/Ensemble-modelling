@@ -41,21 +41,21 @@ def bundle_sample_train(train_dataset, test_dataset, batch_sizes, k, n_classes,
     assert len(set(indices1) | set(indices2) | set(other)) == 60000
 
     lab_dataset_1 = copy.deepcopy(train_dataset)
-    lab_dataset_1.train_data = lab_dataset_1.train_data[indices1]
-    lab_dataset_1.train_labels = lab_dataset_1.train_labels[indices1]
+    lab_dataset_1.data = lab_dataset_1.train_data[indices1]
+    lab_dataset_1.targets = lab_dataset_1.train_labels[indices1]
     assert lab_dataset_1.train_labels.__len__() == lab_dataset_1.train_data.__len__() == k
 
     lab_dataset_2 = copy.deepcopy(train_dataset)
-    lab_dataset_2.train_data = lab_dataset_2.train_data[indices2]
-    lab_dataset_2.train_labels = lab_dataset_2.train_labels[indices2]
+    lab_dataset_2.data= lab_dataset_2.train_data[indices2]
+    lab_dataset_2.targets = lab_dataset_2.train_labels[indices2]
     assert lab_dataset_2.train_labels.__len__() == lab_dataset_2.train_data.__len__() == k
 
     # lab_dataset_1 = copy.deepcopy(train_dataset)[indices1]
     # lab_dataset_2 = copy.deepcopy(train_dataset)[indices2]
     other = [x.long() for x in other]
     unlab_dataset = copy.deepcopy(train_dataset)
-    unlab_dataset.train_data = unlab_dataset.train_data[other]
-    unlab_dataset.train_labels = unlab_dataset.train_labels[other]
+    unlab_dataset.data = unlab_dataset.train_data[other]
+    unlab_dataset.targets = unlab_dataset.train_labels[other]
 
     train_lab_loader1 = torch.utils.data.DataLoader(dataset=lab_dataset_1,
                                                     batch_size=batch_sizes['lab'],
