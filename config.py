@@ -12,7 +12,7 @@ w_norm       = True
 # optim vars
 lr           = 0.001
 beta2        = 0.99
-num_epochs   = 3000
+num_epochs   = 3
 batch_size   = 60
 # temporal ensembling vars
 alpha        = 0.6

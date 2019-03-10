@@ -9,7 +9,7 @@ torch.cuda.manual_seed(1)
 import numpy as np
 np.random.seed(1)
 import argparse
-
+import pandas as pd
 class CNN(nn.Module):
 
     def __init__(self, batch_size, std, p=0.5, fm1=16, fm2=32, device=None):
@@ -51,21 +51,18 @@ def main(args):
     ts = savetime()
     cfg = vars(config)
 
-    for i in range(cfg['n_exp']):
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # for i in range(cfg['n_exp']):
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-        model1 = CNN(cfg['batch_size'], cfg['std'], device=device)
-        model2 = CNN(cfg['batch_size'], cfg['std'], device=device)
+    model1 = CNN(cfg['batch_size'], cfg['std'], device=device)
+    model2 = CNN(cfg['batch_size'], cfg['std'], device=device)
 
-        seed = cfg['seeds'][i]
-        acc= train(model1, model2, seed, device=device, **cfg, args= args)
-        accs.append(acc)
+    seed = cfg['seeds'][0]
+    acc= train(model1, model2, seed, device=device, **cfg, args= args)
 
+    print('saving experiment')
+    pd.DataFrame(acc).T.to_csv(str(vars(args))+'.csv')
 
-    # print('saving experiment')
-    #
-    # records = {'accs':accs, 'cfg':cfg}
-    # np.save('results.npy',records)
 
 
 if __name__ == '__main__':

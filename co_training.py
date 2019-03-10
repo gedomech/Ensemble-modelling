@@ -33,29 +33,32 @@ def bundle_sample_train(train_dataset, test_dataset, batch_sizes, k, n_classes,
         indices2[i * card: (i + 1) * card] = class_items[rd[card:2 * card]].long()
         other[cpt: cpt + n_class - 2 * card] = class_items[rd[2 * card:]].long()
         cpt += n_class - 2 * card
-    indices1 = [x.long() for x in indices1]
-    indices2 = [x.long() for x in indices2]
+    indices1 = [x.long().item() for x in indices1]
+    indices2 = [x.long().item() for x in indices2]
     assert len(set(indices1) & set(indices2)) == 0
     assert len(set(indices1) & set(other)) == 0
     assert len(set(indices2) & set(other)) == 0
     assert len(set(indices1) | set(indices2) | set(other)) == 60000
 
     lab_dataset_1 = copy.deepcopy(train_dataset)
-    lab_dataset_1.data = lab_dataset_1.train_data[indices1]
-    lab_dataset_1.targets = lab_dataset_1.train_labels[indices1]
+    lab_dataset_1.data = lab_dataset_1.data[indices1]
+    lab_dataset_1.targets = lab_dataset_1.targets[indices1]
     assert lab_dataset_1.train_labels.__len__() == lab_dataset_1.train_data.__len__() == k
 
     lab_dataset_2 = copy.deepcopy(train_dataset)
-    lab_dataset_2.data= lab_dataset_2.train_data[indices2]
-    lab_dataset_2.targets = lab_dataset_2.train_labels[indices2]
+    lab_dataset_2.data = lab_dataset_2.data[indices2]
+    lab_dataset_2.targets = lab_dataset_2.targets[indices2]
+
     assert lab_dataset_2.train_labels.__len__() == lab_dataset_2.train_data.__len__() == k
 
     # lab_dataset_1 = copy.deepcopy(train_dataset)[indices1]
     # lab_dataset_2 = copy.deepcopy(train_dataset)[indices2]
     other = [x.long() for x in other]
     unlab_dataset = copy.deepcopy(train_dataset)
-    unlab_dataset.data = unlab_dataset.train_data[other]
-    unlab_dataset.targets = unlab_dataset.train_labels[other]
+
+    unlab_dataset.data= unlab_dataset.data[other]
+    unlab_dataset.targets = unlab_dataset.targets[other]
+
 
     train_lab_loader1 = torch.utils.data.DataLoader(dataset=lab_dataset_1,
                                                     batch_size=batch_sizes['lab'],
@@ -86,7 +89,7 @@ def inference(model1, model2, val_loader):
     acc2_meter = AverageMeter()
     model1.eval()
     model2.eval()
-    val_loader = tqdm(val_loader)
+    val_loader = tqdm(val_loader,leave=False)
     for i, (img, gt) in enumerate(val_loader):
         img, gt = img.to(device), gt.to(device)
         pred1 = model1(img).max(1)[1]
@@ -187,8 +190,8 @@ def train(model1, model2, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epoc
 
             average_pred = (pred_unlab_1 + pred_unlab_2) / 2
 
-            loss3 = F.kl_div(F.softmax(pred_unlab_1, 1).log(), average_pred.detach())
-            loss4 = F.kl_div(F.softmax(pred_unlab_2, 1).log(), average_pred.detach())
+            loss3 = F.kl_div(pred_unlab_1.log(), average_pred.detach())
+            loss4 = F.kl_div(pred_unlab_2.log(), average_pred.detach())
 
             if args.jsd:
 
@@ -207,7 +210,7 @@ def train(model1, model2, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epoc
             if args.adv:
 
                 if random() > 0.5:
-                    adv_imgs_1 = fgsm_attack(lab_img1, epsilon=0.5, data_grad=lab_img1.grad.data).detach()
+                    adv_imgs_1 = fgsm_attack(lab_img1, epsilon=0.05, data_grad=lab_img1.grad.data).detach()
                 else:
                     if unlab_imgs.grad is not None:
                         unlab_imgs.grad.zero_()
@@ -215,10 +218,10 @@ def train(model1, model2, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epoc
                     unlab_mask = unlab_pred.max(1)[1]
                     loss = nn.CrossEntropyLoss()(unlab_pred, unlab_mask.detach())
                     loss.backward()
-                    adv_imgs_1 = fgsm_attack(unlab_imgs, epsilon=0.5, data_grad=unlab_imgs.grad.data).detach()
+                    adv_imgs_1 = fgsm_attack(unlab_imgs, epsilon=0.05, data_grad=unlab_imgs.grad.data).detach()
 
                 if random() > 0.5:
-                    adv_imgs_2 = fgsm_attack(lab_img2, epsilon=0.5, data_grad=lab_img2.grad.data).detach()
+                    adv_imgs_2 = fgsm_attack(lab_img2, epsilon=0.05, data_grad=lab_img2.grad.data).detach()
                 else:
                     if unlab_imgs.grad is not None:
                         unlab_imgs.grad.zero_()
@@ -226,14 +229,14 @@ def train(model1, model2, seed, k=100, alpha=0.6, lr=0.002, beta2=0.99, num_epoc
                     unlab_mask = unlab_pred.max(1)[1]
                     loss = nn.CrossEntropyLoss()(unlab_pred, unlab_mask.detach())
                     loss.backward()
-                    adv_imgs_2 = fgsm_attack(unlab_imgs, epsilon=0.5, data_grad=unlab_imgs.grad.data).detach()
+                    adv_imgs_2 = fgsm_attack(unlab_imgs, epsilon=0.05, data_grad=unlab_imgs.grad.data).detach()
 
                 pred_11 = F.softmax(model1(lab_img1), 1)
                 pred_22 = F.softmax(model2(lab_img2), 1)
                 pred_21 = F.softmax(model2(adv_imgs_1), 1)
                 pred_12 = F.softmax(model1(adv_imgs_2), 1)
-                loss5 = F.kl_div(pred_11.log(), pred_21.detach())
-                loss6 = F.kl_div(pred_22.log(), pred_12.detach())
+                loss5 = F.kl_div(pred_21.log(), pred_11.detach())
+                loss6 = F.kl_div(pred_12.log(), pred_22.detach())
 
                 adv_loss = w / 10 * (loss5 + loss6)
 
